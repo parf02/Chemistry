@@ -1,0 +1,210 @@
+' =========================================================================
+'
+'   File....... homeSecurity.BS2
+'   Purpose.... Home Security
+'   Author..... FREDERICK PARSONS
+'   E-mail..... parf02@gmail.com
+'   Updated.... 05 NOV. 2013
+'
+'   {$STAMP BS2E}
+'   {$PBASIC 2.5}
+'
+' =========================================================================
+
+
+' -----[ Program Description ]---------------------------------------------
+'
+' Enable security system via RFID card. Detect intruders using motion sensors and 
+'door opening sensor. Records time alarm was triggered. Unlocked via RFID card. Written 'for the BASIC stamp BS2
+
+
+
+' -----[ Revision History ]------------------------------------------------
+
+
+' -----[ I/O Definitions ]-------------------------------------------------
+
+Enable          PIN     0                       ' low = reader on
+RX              PIN     1                       ' serial from reader
+Spkr            PIN     2                       ' speaker output
+
+
+' -----[ Constants ]-------------------------------------------------------
+
+‘————RFID constants————
+    T1200       CON     813
+    T2400       CON     396
+    T4800       CON     188
+    T9600       CON     84
+    T19K2       CON     32
+    TMidi       CON     12
+    T38K4       CON     6
+
+
+SevenBit        CON     $2000
+Inverted        CON     $4000
+Open            CON     $8000
+Baud            CON     T2400
+
+TmAdj           CON     $100                    ' x 1.0 (time adjust)
+FrAdj           CON     $100                    ' x 1.0 (freq adjust)
+LastTag         CON     3
+
+‘———Screen Constants———
+N9600 CON 396 + $4000 'Baudmode-9600 bps inverted.
+I CON 254 ' Instruction prefix value.
+CLR CON 1 ' LCD clear-screen instruction.
+LINE2 CON 192 ' Address of 1st char of 2nd line.
+LN2_C12 CON 204  'address of line 2 char 12
+t1 VAR Byte ‘Time keeping constant
+t1 = 0
+
+
+
+' -----[ Variables ]-------------------------------------------------------
+
+buf             VAR     Byte(10)                ' RFID bytes buffer
+tagNum          VAR     Nib                     ' from EEPROM table
+idx             VAR     Byte                    ' tag byte index
+char            VAR     Byte                    ' character from table
+
+
+' -----[ EEPROM Data ]-----------------------------------------------------
+
+Tag1            DATA    "0F02A680F3"            ' valid tags
+Tag2            DATA    "04A29C1A1C"
+Tag3            DATA    "041402CCD7"
+
+Name0           DATA    "Unauthorized", CR, 0
+Name1           DATA    "Frederick", CR, 0
+Name2           DATA    "Tag 2 (Oval)", CR, 0
+Name3           DATA    "Tag 3 (Small Round)", CR, 0
+
+
+' -----[ Initialization ]--------------------------------------------------
+
+Reset:
+  HIGH Enable                                   ' turn off RFID reader
+
+
+' -----[ Program Code ]----------------------------------------------------
+' -----[OFF MODE - WAITING FOR BUTTON]-------------------------------------
+sysOFF:
+  SEROUT 7,n9600,[I,CLR] ' Clear the LCD
+  SEROUT 7,n9600,["To lock, please"] ' Print message
+  SEROUT 7,n9600,[I,LINE2,"press button"] ' Move to line 2 and print.
+DO ' DO NOTHing
+  DEBUG BIN IN4
+LOOP UNTIL (IN4=0) 'keep OFF UNTIL BUTTON is pressed.
+  GOTO RFID
+
+' -----[Locking the system]-------------------------------------
+RFID:
+  SEROUT 7,n9600,[I,CLR] ' Clear the LCD
+  SEROUT 7,n9600,["Please scan"] ' Print message
+  SEROUT 7,n9600,[I,LINE2,"card"] ' Move to line 2 and print.
+  LOW Enable                                    ' activate the reader
+  SERIN RX, T2400, [WAIT($0A), STR buf\10]      ' wait for hdr + ID
+  HIGH Enable
+  DEBUG STR buf, CR                                ' deactivate reader
+
+Check_List:
+  FOR tagNum = 1 TO LastTag                     ' scan through known tags
+    FOR idx = 0 TO 9                            ' scan bytes in tag
+      READ (tagNum - 1 * 10 + idx), char        ' get tag data from table
+        IF (char <> buf(idx)) THEN Bad_Char     ' compare tag to table
+    NEXT
+    GOTO Tag_Found                              ' all bytes match!
+
+Bad_Char:                                       ' try next tag
+  NEXT
+
+Bad_Tag:
+  tagNum = 0
+  GOSUB Show_Name                               ' print message
+  FREQOUT Spkr, 1000 */ TmAdj, 115 */ FrAdj     ' groan
+  PAUSE 1000
+  GOSUB screenUserWrong
+  GOTO sysOFF
+
+Tag_Found:
+  GOSUB Show_Name                               ' print name
+  FREQOUT Spkr, 2000 */ TmAdj, 880 */ FrAdj     ' beep
+  GOTO sysON
+
+' -----[ON MODE - WAITING FOR ALARM]-------------------------------------
+sysON:
+SEROUT 7,n9600,[I,CLR] ' Clear the LCD
+SEROUT 7,n9600,["Locking system"] ' Print message
+SEROUT 7,n9600,[I,LINE2,"...wait 20s"] ' Move to line 2 and print.
+DEBUG "Turning ON the system, please wait 20s"
+ seconds:
+ SEROUT 7,n9600,[I,LN2_C12] ' Move to line 1, character 7.
+ SEROUT 7,n9600,[DEC t1,"s"] ' Print value of b2 followed by 2 spaces.
+ t1 = t1+1 ' Increment b2.
+ PAUSE 1000 ' Slow the loop down.
+ IF (t1 < 21) THEN
+  GOTO seconds
+ ELSE
+ DEBUG CLS
+ ENDIF
+t1 = 0 'reset timer
+SEROUT 7,n9600,[I,CLR] ' Clear the LCD
+SEROUT 7,n9600,["Locked"] ' Print message
+
+‘———checking the sensors——
+DO
+  IF (IN5 = 1) THEN
+    SEROUT 7,n9600,[I,CLR] ' Clear the LCD
+    SEROUT 7,n9600,["ALARM!"] ' Print message
+    DEBUG  "IN0 = ", BIN IN5   ' Display state of PIR sensor
+    PAUSE 1000         ' Small Delay
+    GOTO alarm
+
+   ELSEIF (IN6 = 1) THEN
+    SEROUT 7,n9600,[I,CLR] ' Clear the LCD
+    SEROUT 7,n9600,["ALARM!"] ' Print message
+    DEBUG  "IN0 = ", BIN IN5   ' Display state of PIR sensor
+    PAUSE 1000         ' Small Delay
+    GOTO alarm
+
+  'ELSEIF (IN1 = 1 ) THEN
+    'GOTO alarm
+
+  ENDIF
+LOOP           ' Repeat Forever
+
+
+
+' -----[ALARM MODE - WAITING FOR UNLOCKING]-------------------------------------
+alarm:
+FREQOUT Spkr, 2000 */ TmAdj, 880 */ FrAdj     ' beep
+DEBUG CLS, "Pausing 2s", CR
+PAUSE 2000
+GOTO sysOFF
+
+END
+
+
+' -----[ Subroutines ]-----------------------------------------------------
+
+‘——— Prints name associated with RFID tag———
+Show_Name:
+  DEBUG DEC tagNum, ": "
+  LOOKUP tagNum,
+         [Name0, Name1, Name2, Name3], idx      ' point to first character
+  DO
+    READ idx, char                              ' read character from name
+    IF (char = 0) THEN EXIT                     ' if 0, we're done
+    DEBUG char                                  ' otherwise print it
+    idx = idx + 1                               ' point to next character
+  LOOP
+RETURN
+
+screenUserWrong:
+  SEROUT 7,n9600,[I,CLR] ' Clear the LCD screen.
+  PAUSE 1
+  SEROUT 7,n9600,["Wrong User"] ' Print message
+  PAUSE 3000
+  SEROUT 7,n9600,[I,CLR] ' Clear the LCD screen.
+RETURN
